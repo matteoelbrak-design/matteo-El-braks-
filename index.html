@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Mini-Brawl — Royal Flash Edition</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{
+    --bg1:#071126; --bg2:#0b1320; --accent:#7c3aed;
+    --ui:#dfeeff;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg1),var(--bg2));font-family:Inter,system-ui,Arial;color:var(--ui);overflow:hidden}
+  #app{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;border-radius:8px;box-shadow:0 30px 80px rgba(2,6,23,0.8)}
+  /* MENU */
+  #menu{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:120;background:linear-gradient(180deg,rgba(2,6,23,0.7),rgba(2,6,23,0.85))}
+  .card{background:linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.02));padding:20px;border-radius:12px;min-width:420px;box-shadow:0 10px 40px rgba(0,0,0,0.6)}
+  h1{margin:0 0 8px;color:var(--accent);text-shadow:0 0 12px rgba(124,58,237,0.18)}
+  label{display:block;margin:8px 0;color:#bcd3ef;font-size:14px}
+  input,select{width:100%;padding:8px;border-radius:8px;border:0;background:rgba(255,255,255,0.03);color:inherit}
+  button{width:100%;padding:12px;border-radius:10px;border:0;background:var(--accent);color:white;font-weight:700;cursor:pointer;margin-top:10px}
+  .row{display:flex;gap:10px}
+  .small{flex:1}
+  /* HUD & overlays */
+  #hud{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:110;text-align:center}
+  #scores{font-weight:800;font-size:18px;color:#facc15;text-shadow:0 0 10px rgba(250,200,20,0.12)}
+  #info{font-size:13px;color:#9fb0d0;margin-top:6px}
+  #countdown{position:absolute;left:50%;top:28%;transform:translate(-50%,-50%);font-size:96px;color:white;text-shadow:0 0 18px var(--accent);z-index:200;display:none}
+  #combo{position:absolute;left:50%;top:18%;transform:translateX(-50%);font-size:40px;color:#ff6b6b;z-index:200;display:none;pointer-events:none}
+  #kanji{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);font-size:88px;color:#fff700;text-shadow:0 0 30px #ff4500;z-index:210;display:none;pointer-events:none}
+  #flashOverlay{position:absolute;inset:0;pointer-events:none;z-index:250;opacity:0;transition:opacity 0.25s ease}
+  #flashBloom{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:500px;height:500px;border-radius:50%;pointer-events:none;mix-blend-mode:screen;opacity:0;transition:opacity 0.3s ease, transform 0.3s ease;z-index:260}
+  #podium{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:28px;z-index:300}
+  #hint{position:absolute;bottom:10px;left:12px;color:#9fb0d0;font-size:12px;z-index:110}
+  /* small hit popup style */
+  .hitPopup{position:absolute;pointer-events:none;font-weight:800;text-shadow:0 0 8px rgba(0,0,0,0.6)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvasWrap" style="transform-origin:center center;">
+    <canvas id="game" width="1280" height="720"></canvas>
+  </div>
+
+  <!-- UI -->
+  <div id="hud"><div id="scores">J1: 0 • J2: 0</div><div id="info">Configure et appuie sur Démarrer</div></div>
+  <div id="countdown">3</div>
+  <div id="combo"></div>
+  <div id="kanji"></div>
+
+  <!-- flash overlays for realistic immersive flash -->
+  <div id="flashOverlay" style="background:linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0));"></div>
+  <div id="flashBloom" style="background:radial-gradient(circle at center, rgba(255,255,255,0.98) 0%, rgba(180,200,255,0.6) 25%, rgba(0,0,0,0) 60%);"></div>
+
+  <div id="podium"></div>
+  <div id="hint">J1: Q/D • Z saut • E att • R spé • A super — J2: ←/→ • ↑ saut • = att • : spé • ù/ u super</div>
+
+  <!-- MENU -->
+  <div id="menu">
+    <div class="card">
+      <h1>⚔️ Mini-Brawl — Royal Flash</h1>
+      <label>Nom Joueur 1: <input id="name1" value="J1"></label>
+      <label>Nom Joueur 2: <input id="name2" value="J2"></label>
+      <div class="row">
+        <div class="small"><label>Mode J2<select id="botMode"><option value="0">Humain</option><option value="1">Bot facile</option><option value="2" selected>Bot moyen</option><option value="3">Bot difficile</option></select></label></div>
+        <div class="small"><label>Rounds<select id="rounds"><option>1</option><option selected>3</option><option>5</option></select></label></div>
+      </div>
+      <label>Qualité visuelle<select id="quality"><option value="low">Low</option><option value="med" selected>Medium</option><option value="high">High</option></select></label>
+      <button id="startBtn">Démarrer la partie</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================
+   Mini-Brawl — Royal Flash
+   - All-in-one HTML game
+   - Hit effects colored by attacker
+   - Realistic immersive flash + bloom + zoom
+   - KO only when truly falling off arena
+   ========================= */
+
+// Canvas and context
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const canvasWrap = document.getElementById('canvasWrap');
+
+// DOM elements for FX
+const menu = document.getElementById('menu');
+const countdownEl = document.getElementById('countdown');
+const comboEl = document.getElementById('combo');
+const kanjiEl = document.getElementById('kanji');
+const flashOverlay = document.getElementById('flashOverlay');
+const flashBloom = document.getElementById('flashBloom');
+const podiumEl = document.getElementById('podium');
+const scoresEl = document.getElementById('scores');
+const infoEl = document.getElementById('info');
+
+// Input
+let keys = {};
+window.addEventListener('keydown', e => { keys[e.key] = true; });
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Game state
+let players = [], platforms = [];
+let botMode = 0, roundsToWin = 3, quality = 'med';
+let scores = [0,0], currentRound = 1;
+let roundPaused = true, roundActive = false;
+let camera = {x:0,y:0,shake:0,zoom:1};
+let lastTime = performance.now();
+let dtScale = 1;
+
+// Attack strengths
+const NORMAL_PUSH = 400;
+const SPECIAL_FORCE = 1000;
+const SUPER_FORCE = 2000;
+const KO_MARGIN = 420; // must fall far below to KO
+
+/* ---------- Utilities ---------- */
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const rand = (a,b) => a + Math.random()*(b-a);
+const intersects = (a,b) => !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h);
+
+/* ---------- Player factory ---------- */
+function createPlayer(name, x, color, controls, isBot=false) {
+  return {
+    name,
+    x, y: 180, w:56, h:72, color, hat:'#fff',
+    vx:0, vy:0, facing:1, onGround:false, jumpsLeft:2, _jumpPressed:false,
+    damage:0, combo:0, comboTimer:0,
+    isAttacking:false, attackTimer:0, hasSword:false,
+    specialReady:true, specialTimer:0,
+    superReady:true, superTimer:0,
+    superBeams:[], particles:[], shock:null, fireTrail:false, fireTrailTimer:0,
+    controls, isBot, invul:false
+  };
+}
+
+/* ---------- Arena setup ---------- */
+function setupPlatforms(){
+  platforms = [
+    {x:-600, y:H-80, w: W+1200, h:80},
+    {x:160, y:H*0.68, w:960, h:18},
+    {x:80, y:H*0.46, w:220, h:16},
+    {x:W-300, y:H*0.46, w:220, h:16},
+    {x:480, y:H*0.28, w:320, h:16}
+  ];
+}
+
+/* ---------- Menu start ---------- */
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  const n1 = document.getElementById('name1').value || 'J1';
+  const n2 = document.getElementById('name2').value || 'J2';
+  botMode = parseInt(document.getElementById('botMode').value);
+  roundsToWin = parseInt(document.getElementById('rounds').value);
+  quality = document.getElementById('quality').value;
+  startMatch(n1, n2);
+  menu.style.display = 'none';
+});
+
+/* ---------- Start match and round countdown ---------- */
+function startMatch(n1, n2){
+  scores = [0,0];
+  currentRound = 1;
+  setupPlatforms();
+  players = [
+    createPlayer(n1, 340, '#ff6b6b', {left:'q', right:'d', up:'z', attack:'e', special:'r', super:'a'}, false),
+    createPlayer(n2, 900, '#60a5fa', {left:'ArrowLeft', right:'ArrowRight', up:'ArrowUp', attack:'=', special:':', super:'ù'}, botMode>0)
+  ];
+  showScores();
+  startRoundCountdown();
+}
+
+function startRoundCountdown(){
+  roundPaused = true; roundActive = false;
+  countdownEl.style.display = 'block';
+  const seq = ['3','2','1','FIGHT!'];
+  let i=0;
+  const step = ()=>{
+    countdownEl.textContent = seq[i];
+    countdownEl.style.color = seq[i] === 'FIGHT!' ? '#7c3aed' : 'white';
+    i++;
+    if(i < seq.length) setTimeout(step, 700);
+    else setTimeout(()=>{ countdownEl.style.display='none'; roundPaused=false; roundActive=true; }, 350);
+  };
+  step();
+}
+
+/* ---------- FX: immersive flash ---------- */
+/* flashColor: rgb string e.g. "255,200,100" */
+function immersiveFlash(flashColor = '255,240,220', intensity = 1.0, duration = 280){
+  // overlay fade
+  flashOverlay.style.background = `linear-gradient(180deg, rgba(${flashColor},0.06), rgba(255,255,255,0.0))`;
+  flashOverlay.style.transition = 'none';
+  flashOverlay.style.opacity = String(0.5 * intensity);
+  // bloom center colored by attacker
+  flashBloom.style.background = `radial-gradient(circle at center, rgba(${flashColor},0.98) 0%, rgba(${flashColor},0.45) 22%, rgba(255,255,255,0.04) 45%, rgba(0,0,0,0) 70%)`;
+  flashBloom.style.opacity = String(0.95 * intensity);
+  flashBloom.style.transform = 'translate(-50%,-50%) scale(1.12)';
+  // camera zoom pulse
+  canvasWrap.style.transition = 'transform 0.12s ease-out';
+  canvasWrap.style.transform = 'scale(1.03)';
+  // fade out
+  setTimeout(()=>{
+    flashOverlay.style.transition = `opacity ${duration/1000}s ease-out`;
+    flashOverlay.style.opacity = '0';
+    flashBloom.style.transition = `opacity ${duration/1000}s ease-out, transform ${duration/1000}s ease-out`;
+    flashBloom.style.opacity = '0';
+    flashBloom.style.transform = 'translate(-50%,-50%) scale(0.95)';
+    canvasWrap.style.transform = 'scale(1)';
+  }, 60);
+}
+
+/* ---------- PARTICLES / HIT POPUPS ---------- */
+function spawnHitParticles(attacker, x, y, count, strong=false){
+  const color = attacker.color;
+  for(let i=0;i<count;i++){
+    attacker.particles.push({
+      x: x + (Math.random()-0.5)*20,
+      y: y + (Math.random()-0.5)*20,
+      vx: (Math.random()-0.5) * (strong ? 500 : 200),
+      vy: -Math.random() * (strong ? 400 : 200),
+      life: 0.45 + Math.random()*0.6,
+      color: color
+    });
+  }
+}
+function showHitPopup(attacker, text, x, y){
+  const popup = document.createElement('div');
+  popup.className = 'hitPopup';
+  popup.style.left = (x) + 'px';
+  popup.style.top = (y) + 'px';
+  popup.style.color = attacker.color;
+  popup.style.fontSize = '18px';
+  popup.style.transform = 'translate(-50%, -140%)';
+  popup.style.opacity = '1';
+  popup.textContent = text;
+  document.body.appendChild(popup);
+  // animate up + fade
+  const start = performance.now();
+  const duration = 700;
+  function anim(t){
+    const p = (t - start)/duration;
+    if(p >= 1){ popup.remove(); return; }
+    popup.style.top = (y - p*50) + 'px';
+    popup.style.opacity = String(1 - p);
+    requestAnimationFrame(anim);
+  }
+  requestAnimationFrame(anim);
+}
+
+/* ---------- BOT logic ---------- */
+function botThink(bot, target, level){
+  const inpt = {left:false, right:false, up:false, attack:false, special:false, super:false};
+  if(roundPaused) return inpt;
+  const dx = target.x - bot.x, dy = target.y - bot.y;
+  const dist = Math.hypot(dx,dy);
+  if(dist > 280){ if(dx>0) inpt.right=true; else inpt.left=true; }
+  else {
+    if(target.isAttacking && Math.random() < 0.6){ if(dx>0) inpt.left=true; else inpt.right=true; if(Math.random()<0.5) inpt.up=true; }
+    else { if(Math.random() < 0.5) { if(dx>0) inpt.right=true; else inpt.left=true; } }
+    if(Math.random() < 0.06*level) inpt.up = true;
+  }
+  if(dist < 120 && Math.random() < 0.25*level) inpt.attack = true;
+  if(dist < 220 && bot.specialReady && Math.random() < 0.08*level) inpt.special = true;
+  if(bot.superReady && Math.random() < 0.03*level) inpt.super = true;
+  return inpt;
+}
+
+/* ---------- Apply hit: color-coded & immersive flash ---------- */
+function applyHit(attacker, target, vx, vy, damage, strong=false, isSuper=false){
+  target.vx = vx; target.vy = vy; target.damage += damage;
+  // particles take attacker's color
+  spawnHitParticles(attacker, target.x + target.w/2, target.y + target.h/2, isSuper ? 36 : (strong ? 18 : 10), isSuper || strong);
+  // show small popup with attacker's color
+  showHitPopup(attacker, `+${damage}`, target.x + target.w/2, target.y);
+  // combo
+  attacker.combo = (attacker.combo || 0) + 1;
+  attacker.comboTimer = 1.2;
+  showCombo(`${attacker.combo} HIT`);
+  // immersive flash and effects sized by attack power
+  const rgb = hexToRgb(attacker.color);
+  const flashColor = `${rgb.r},${rgb.g},${rgb.b}`;
+  immersiveFlash(flashColor, isSuper ? 1.2 : (strong ? 0.9 : 0.6), isSuper ? 320 : 220);
+  if(isSuper) { triggerShake(36); showKanji('必殺'); slowMotion(380, 0.18); }
+  else if(strong){ triggerShake(18); showKanji('破'); slowMotion(200, 0.42); }
+  else { triggerShake(8); }
+}
+
+/* ---------- Color helper ---------- */
+function hexToRgb(hex){
+  // supports #rrggbb
+  hex = hex.replace('#','');
+  const r = parseInt(hex.substring(0,2),16);
+  const g = parseInt(hex.substring(2,4),16);
+  const b = parseInt(hex.substring(4,6),16);
+  return {r,g,b};
+}
+
+/* ---------- FX helpers ---------- */
+function triggerShake(amount=12){ camera.shake = Math.max(camera.shake, amount); }
+function showCombo(text){
+  comboEl.style.display = 'block';
+  comboEl.style.opacity = '1';
+  comboEl.textContent = text;
+  setTimeout(()=> { comboEl.style.opacity = '0'; setTimeout(()=> comboEl.style.display='none', 300); }, 700);
+}
+function showKanji(text){ kanjiEl.style.display='block'; kanjiEl.textContent = text; setTimeout(()=> kanjiEl.style.display='none', 700); }
+function slowMotion(duration=360, scale=0.25){ dtScale = scale; setTimeout(()=> dtScale = 1, duration); }
+
+/* ---------- Main update loop ---------- */
+let last = performance.now();
+function update(now){
+  requestAnimationFrame(update);
+  let dt = (now - last)/1000 * dtScale;
+  if(dt > 0.06) dt = 0.06;
+  last = now;
+
+  if(!roundPaused){
+    // update players
+    for(let i=0;i<players.length;i++){
+      const p = players[i];
+      // inputs
+      let input = {
+        left: keys[p.controls.left],
+        right: keys[p.controls.right],
+        up: keys[p.controls.up],
+        attack: keys[p.controls.attack],
+        special: keys[p.controls.special],
+        super: keys[p.controls.super]
+      };
+      // allow 'u' as alt for 'ù' key for super for AZERTY fallback
+      if(p.controls.super === 'ù' && (keys['u'] || keys['U'])) input.super = true;
+
+      if(p.isBot){
+        input = botThink(p, players[0], botMode);
+      }
+
+      // movement forces
+      if(input.left){ p.vx -= 2600 * dt; p.facing = -1; }
+      if(input.right){ p.vx += 2600 * dt; p.facing = 1; }
+      p.vx *= p.onGround ? 0.88 : 0.995;
+      if(Math.abs(p.vx) < 6) p.vx = 0;
+      if(Math.abs(p.vx) > 520) p.vx = Math.sign(p.vx) * 520;
+
+      // jump/double jump
+      if(input.up && p.jumpsLeft > 0 && !p._jumpPressed){
+        p.vy = -660; p.jumpsLeft--; p.onGround = false; p._jumpPressed = true;
+        // smoke particles
+        for(let s=0;s<6;s++) p.particles.push({x: p.x + p.w/2 + (Math.random()-0.5)*28, y: p.y + p.h, vx:(Math.random()-0.5)*120, vy:-Math.random()*180, life:0.6, color:'rgba(200,200,200,0.9)'});
+      }
+      if(!input.up) p._jumpPressed = false;
+
+      // attack normal
+      if(input.attack && !p.isAttacking && !p.hasSword){
+        p.isAttacking = true; p.hasSword = true; p.attackTimer = 0.22;
+        setTimeout(()=>{ p.hasSword = false; }, 220);
+      }
+      if(p.isAttacking){
+        p.attackTimer -= dt;
+        if(p.attackTimer <= 0){ p.isAttacking = false; p.attackTimer = 0; }
+      }
+
+      // target detection & collisions
+      const target = players[(i+1)%2];
+      const dx = (target.x + target.w/2) - (p.x + p.w/2);
+      const dy = (target.y + target.h/2) - (p.y + p.h/2);
+      const dist = Math.hypot(dx, dy);
+
+      // normal attack effect
+      if(p.isAttacking && dist < 120 && !target.invul){
+        const push = NORMAL_PUSH + target.damage * 2;
+        applyHit(p, target, Math.sign(dx) * push, -240, 12, true, false);
+        target.invul = true;
+        setTimeout(()=> target.invul = false, 220);
+      }
+
+      // special (propulsion) - 5s cooldown, usable when reasonably close
+      if(input.special && p.specialReady && dist < 280){
+        p.specialReady = false; p.specialTimer = 5;
+        const angle = Math.atan2(dy, dx);
+        const fx = Math.cos(angle) * SPECIAL_FORCE;
+        const fy = Math.sin(angle) * -SPECIAL_FORCE * 0.6;
+        applyHit(p, target, fx, fy, 40, true, false);
+        target.shock = {r:0, max:160};
+        target.fireTrail = true; target.fireTrailTimer = 0.9;
+        // immediate visual
+      }
+      if(p.specialTimer > 0) p.specialTimer -= dt; else p.specialReady = true;
+
+      // super (laser) - 10s cooldown
+      if(input.super && p.superReady){
+        p.superReady = false; p.superTimer = 10;
+        // spawn beam visual
+        const beam = {x: p.facing===1 ? p.x + p.w : p.x - 1400, y: p.y + 28, w: 1400, h: 36, life: 0.55, facing: p.facing};
+        p.superBeams.push(beam);
+        // immediate massive hit if target aligned
+        if(Math.abs(dx) < 1400 && Math.abs(dy) < 120 && Math.sign(dx) === p.facing){
+          applyHit(p, target, Math.sign(dx) * SUPER_FORCE, -600, 60, true, true);
+        } else {
+          // still produce big flash/bloom even on miss
+          const rgb = hexToRgb(p.color);
+          immersiveFlash(`${rgb.r},${rgb.g},${rgb.b}`, 0.95, 240);
+          triggerShake(20); showKanji('必殺'); slowMotion(320, 0.22);
+        }
+      }
+      if(p.superTimer > 0) p.superTimer -= dt; else p.superReady = true;
+
+      // physics
+      p.vy += 1400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.onGround = false;
+
+      // platform collisions - only stop when landing on platform top
+      for(const pl of platforms){
+        const b = {x:p.x, y:p.y, w:p.w, h:p.h};
+        if(b.x + b.w > pl.x && b.x < pl.x + pl.w && b.y + b.h > pl.y && b.y + b.h - p.vy*dt <= pl.y + 12 && p.vy >= -900){
+          p.y = pl.y - p.h; p.vy = 0; p.onGround = true; p.jumpsLeft = 2;
+        }
+      }
+
+      // KO detection: only if player falls well below arena (y > H + KO_MARGIN)
+      if(p.y > H + KO_MARGIN){
+        endRound(i);
+        return;
+      }
+
+      // particles update
+      for(let k = p.particles.length - 1; k >= 0; k--){
+        const pr = p.particles[k];
+        pr.life -= dt;
+        pr.x += pr.vx * dt;
+        pr.y += pr.vy * dt;
+        pr.vy += 1400 * dt * 0.5;
+        if(pr.life <= 0) p.particles.splice(k, 1);
+      }
+      // beams update
+      for(let k = p.superBeams.length - 1; k >= 0; k--){
+        p.superBeams[k].life -= dt;
+        if(p.superBeams[k].life <= 0) p.superBeams.splice(k, 1);
+      }
+      // shock expansion
+      if(p.shock){
+        p.shock.r += 700 * dt;
+        if(p.shock.r > p.shock.max) p.shock = null;
+      }
+      // fireTrail
+      if(p.fireTrail){
+        spawnParticle(p, p.x + p.w/2, p.y + p.h/2, 'red', 60);
+        p.fireTrailTimer -= dt;
+        if(p.fireTrailTimer <= 0) p.fireTrail = false;
+      }
+      // combo decay
+      if(p.comboTimer > 0){ p.comboTimer -= dt; if(p.comboTimer <= 0) p.combo = 0; }
+    } // end players loop
+
+    // camera follow center players
+    const targetCamX = (players[0].x + players[1].x)/2 - W/2;
+    const targetCamY = (players[0].y + players[1].y)/2 - H/2;
+    camera.x += (targetCamX - camera.x) * 0.12;
+    camera.y += (targetCamY - camera.y) * 0.12;
+    if(camera.shake > 0) camera.shake *= 0.9; else camera.shake = 0;
+  } // end if not paused
+
+  // update HUD
+  updateHUD();
+}
+
+/* ---------- End round / reset / podium ---------- */
+function endRound(loserIdx){
+  roundPaused = true;
+  const winner = loserIdx === 0 ? 1 : 0;
+  scores[winner] += 1;
+  showScores();
+  setTimeout(()=> {
+    // reset players
+    players[0].x = 340; players[0].y = 180; players[0].vx = players[0].vy = 0; players[0].damage = 0; players[0].combo = 0;
+    players[1].x = 900; players[1].y = 180; players[1].vx = players[1].vy = 0; players[1].damage = 0; players[1].combo = 0;
+    players.forEach(p=>{
+      p.particles = []; p.superBeams = []; p.shock = null; p.fireTrail = false;
+      p.specialReady = true; p.superReady = true; p.specialTimer = 0; p.superTimer = 0; p.invul = false;
+    });
+    currentRound++;
+    if(scores[0] >= roundsToWin || scores[1] >= roundsToWin){
+      showPodium();
+    } else {
+      startRoundCountdown();
+    }
+  }, 900);
+}
+
+function showPodium(){
+  podiumEl.style.display = 'flex';
+  const champ = scores[0] > scores[1] ? players[0].name : players[1].name;
+  podiumEl.innerHTML = `<div style="text-align:center"><div style="font-size:48px">Victoire !</div><div style="font-weight:900;font-size:28px">${champ}</div></div>`;
+  setTimeout(()=> location.reload(), 3000);
+}
+
+/* ---------- HUD & spawn helpers ---------- */
+function showScores(){ scoresEl.textContent = `${players[0].name}: ${scores[0]}  •  ${players[1].name}: ${scores[1]} — Manche ${currentRound}`; }
+function updateHUD(){ showScores(); infoEl.textContent = `J1: ${Math.floor(players[0].damage)}%  |  J2: ${Math.floor(players[1].damage)}%`; }
+function spawnParticle(parent, x, y, color='orange', speed=120){
+  parent.particles.push({x,y,vx:(Math.random()-0.5)*speed, vy:(Math.random()-0.8)*speed*0.6, life:0.4+Math.random()*0.6, color});
+}
+
+/* ---------- Render loop ---------- */
+function render(){
+  requestAnimationFrame(render);
+  ctx.clearRect(0,0,W,H);
+
+  // camera transform with shake and optional zoom
+  const shakeX = camera.shake ? (Math.random()-0.5) * camera.shake : 0;
+  const shakeY = camera.shake ? (Math.random()-0.5) * camera.shake : 0;
+  ctx.save();
+  ctx.translate(-camera.x + shakeX, -camera.y + shakeY);
+
+  // background gradient
+  const g = ctx.createLinearGradient(camera.x, camera.y, camera.x, camera.y + H);
+  g.addColorStop(0, '#071126'); g.addColorStop(1, '#0b1320');
+  ctx.fillStyle = g; ctx.fillRect(camera.x, camera.y, W, H);
+
+  // ambient lights for arena
+  for(let i=0;i<6;i++){
+    const px = camera.x + 120 + i*200;
+    const py = camera.y + platforms[0].y - 150;
+    const lg = ctx.createRadialGradient(px,py,10,px,py,240);
+    lg.addColorStop(0,'rgba(124,58,237,0.12)'); lg.addColorStop(1,'rgba(12,12,20,0)');
+    ctx.fillStyle = lg; ctx.fillRect(px-160,py-160,320,320);
+  }
+
+  // draw platforms
+  for(const pl of platforms){
+    ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fillRect(pl.x, pl.y, pl.w, 3);
+    const pg = ctx.createLinearGradient(pl.x,pl.y,pl.x,pl.y+pl.h);
+    pg.addColorStop(0,'#4b5563'); pg.addColorStop(1,'#111827');
+    ctx.fillStyle = pg; ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(pl.x, pl.y+pl.h-2, pl.w, 6);
+  }
+
+  // players
+  for(const p of players){
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(p.x + 8, p.y + p.h - 6, p.w, 8);
+
+    // body
+    ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.w, p.h);
+
+    // hat
+    ctx.fillStyle = p.hat; ctx.fillRect(p.x + 12, p.y - 16, 32, 12);
+
+    // name & damage
+    ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif';
+    ctx.fillText(`${p.name} ${Math.floor(p.damage)}%`, p.x, p.y - 18);
+
+    // sword when attacking (blocky)
+    if(p.hasSword){
+      const sx = p.facing === 1 ? p.x + p.w + 8 : p.x - 48;
+      const sy = p.y + 22;
+      ctx.fillStyle = '#8b8b8b'; ctx.fillRect(sx, sy, 6, 6);
+      ctx.fillStyle = '#dfe7ee'; ctx.fillRect(sx + (p.facing===1?6:-46), sy - 6, 42, 12);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(sx + (p.facing===1?18:-28), sy - 4, 10, 2);
+    }
+
+    // aura if heavy damage
+    if(p.damage >= 100){
+      ctx.strokeStyle = 'rgba(255,70,70,0.22)'; ctx.lineWidth = 6;
+      ctx.strokeRect(p.x - 6, p.y - 6, p.w + 12, p.h + 12);
+    }
+
+    // shock expansion
+    if(p.shock){
+      ctx.strokeStyle = 'rgba(255,165,0,0.28)'; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.arc(p.x + p.w/2, p.y + p.h/2, p.shock.r, 0, Math.PI*2); ctx.stroke();
+    }
+
+    // super beams (laser)
+    for(const b of p.superBeams){
+      const bx = b.x, by = b.y, bw = b.w * b.facing;
+      const grad = ctx.createLinearGradient(bx,by,bx+bw,by);
+      grad.addColorStop(0,'rgba(0,200,255,0.06)');
+      grad.addColorStop(0.45,'rgba(255,255,255,0.95)');
+      grad.addColorStop(0.55,'rgba(255,255,255,0.95)');
+      grad.addColorStop(1,'rgba(0,200,255,0.04)');
+      ctx.fillStyle = grad; ctx.fillRect(bx,by,bw,b.h);
+      ctx.fillStyle = 'rgba(0,220,255,0.06)'; ctx.fillRect(bx - 40, by - 12, bw + 80, b.h + 24);
+    }
+
+    // particles (colored by attacker)
+    for(const pr of p.particles){
+      ctx.fillStyle = pr.color; ctx.fillRect(pr.x, pr.y, 6, 6);
+    }
+  }
+
+  ctx.restore();
+
+  // DOM overlays: handle canvasWrap zoom for camera "zoom" effect (we used CSS in immersiveFlash)
+  const app = document.getElementById('app');
+  if(camera.shake > 0) {
+    const sx = (Math.random()-0.5) * camera.shake;
+    const sy = (Math.random()-0.5) * camera.shake;
+    app.style.transform = `translate(${sx}px, ${sy}px)`;
+  } else {
+    app.style.transform = '';
+  }
+}
+
+/* ---------- start loops ---------- */
+requestAnimationFrame(update);
+requestAnimationFrame(render);
+
+/* ---------- small helpers ---------- */
+function hexToRgb(hex){
+  hex = hex.replace('#','');
+  const r = parseInt(hex.substring(0,2),16);
+  const g = parseInt(hex.substring(2,4),16);
+  const b = parseInt(hex.substring(4,6),16);
+  return {r,g,b};
+}
+
+/* ---------- debug reload ---------- */
+window.addEventListener('keydown', e => { if(e.key === 'F1') location.reload(); });
+
+/* ---------- Initial message ---------- */
+infoEl.textContent = 'Bienvenue — configure et démarre la partie. Les HIT sont colorés selon l\'attaquant, et le flash est immersif pour un combat royal.';
+</script>
+</body>
+</html>
